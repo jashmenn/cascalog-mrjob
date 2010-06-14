@@ -34,16 +34,21 @@
   ))
 
 (def words (memory-source-tap [
-  ["My dog has fleas. Good dog"]
+  ["My dog has fleas. Good Dog"]
   ]))
 
-(def word-split (memory-source-tap ["My" "dog" "has" "fleas." "Good" "dog" ]))
+(def word-split (memory-source-tap ["My" "dog" "has" "fleas." "Good" "Dog" ]))
 
 (w/defmapcatop [re-split-op [pattern]] [str]
   (s/re-split pattern (.toString str)))
 
+(w/defmapop [re-line-split [pattern]] [str]
+  (s/re-split pattern (.toString str)))
+
 (defn to-lower-case [token-string]
   (.toLowerCase token-string))
+
+(defn parse-int [number] (Integer. number))
 
 (comment 
 (?<- (stdout) [?word] (words ?line) 
@@ -53,11 +58,6 @@
                     (re-split-op [#"\s+"] ?line :> ?word) (:distinct false))]
   (?- (stdout) q))
   )
-
-(defn cascade [& flows]
-  (let [c (new CascadeConnector)]
-    (do 
-      (.connect c (into-array flows)))))
 
 (comment
 (let [tmp1 (hfs-textline "tmp/tmp1")
@@ -72,29 +72,80 @@
 )
 
 
-(defn build-jobconf [args]
+(def lowercase-jobconf
   (let [jobconf (new JobConf)]
     (doto jobconf 
-      (.setJobName "wordcount1")
+      (.setJobName "lowercase")
       (.setOutputKeyClass Text)
       (.setOutputValueClass IntWritable)
       (.setMapperClass SampleMRJob$Map)
       (.setReducerClass IdentityReducer)
       (.setInputFormat TextInputFormat)
       (.setOutputFormat TextOutputFormat)
-      (FileInputFormat/addInputPath (first args)) ; todo: setInputPaths
-      (FileOutputFormat/setOutputPath (second args))
       )))
 
-(defn build-mr-flow [in-tap out-tap]
-  (new MapReduceFlowTapped "name" (build-jobconf [(.getPath in-tap) (.getPath out-tap)])
+(defn mr-flow [jobconf in-tap out-tap]
+  (doto jobconf
+      (FileInputFormat/addInputPath (.getPath in-tap)) ; todo: setInputPaths
+      (FileOutputFormat/setOutputPath (.getPath out-tap)))
+  (new MapReduceFlowTapped (.getJobName jobconf) jobconf 
        in-tap out-tap false true))
+
+(defn cascade [& flows]
+  (let [c (new CascadeConnector)]
+    (do 
+      (.connect c (into-array flows)))))
+
+; (comment 
+
+(let [tmp1 (hfs-textline "tmp/tmp1")
+      tmp2 (hfs-textline "tmp/tmp2")
+      q1 (<- [?word] (words ?line) 
+                    (re-split-op [#"\s+"] ?line :> ?word) (:distinct false))
+      flow1 (?| tmp1 q1)
+      ;
+      ; q2 (<- [?w] (tmp1 ?line) 
+      ;               (to-lower-case ?line :> ?w) (:distinct false))
+      ; flow2 (?| tmp2 q2)
+      flow2 (mr-flow lowercase-jobconf tmp1 tmp2) 
+      ;
+      q3 (<- [?word ?sum] 
+             (tmp2 ?line) 
+             (re-line-split [#"\t"] ?line :> ?word ?count) (:distinct false)
+             (parse-int ?count :> ?count-i)
+             (c/sum ?count-i :> ?sum))
+      flow3 (?| (stdout) q3)
+      ;
+      c (cascade flow1 flow2 flow3)]
+  (.complete c))
+
+  ; )
+
+(def word-prelim-counts 
+  (memory-source-tap [["my" "1"] 
+                      ["dog" "1"]
+                      ["has" "1"]
+                      ["fleas." "1"]
+                      ["good" "1"]
+                      ["dog" "1"]]))
+
+
+(comment
+
+(?<- (stdout) [?word ?sum] 
+     (word-prelim-counts ?word ?count)
+     (parse-int ?count :> ?count-i)
+     (c/sum ?count-i :> ?sum) 
+     )
+
+  )
 
 (comment 
 
 (let [tmp1 (hfs-textline "tmp/tmp1")
       tmp2 (hfs-textline "tmp/tmp2")
-      flow1 (build-mr-flow tmp1 tmp2)
+      jobconf (build-jobconf)
+      flow1 (mr-flow jobconf tmp1 tmp2)
       c (cascade flow1)]
   (.complete c))
 
