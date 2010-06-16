@@ -77,14 +77,13 @@
   []
     (?<- (stdout)  
          [?word ?sum] 
-         ((hfs-textline "test/data/dog.txt") ?line) 
+         (words ?line) 
          (re-split-op [#"\s+"] ?line :> ?word) (:distinct false)
          (job [jobconf] ?word :> ?word ?one-str)
          (parse-int ?one-str :> ?one) ; seqfile would solve this but complicate things elsewhere
          (c/sum ?one :> ?sum)
     )
   )
-
 
 (defn run-test-job []
   (let [tmp1 (hfs-textline "tmp/tmp1")
