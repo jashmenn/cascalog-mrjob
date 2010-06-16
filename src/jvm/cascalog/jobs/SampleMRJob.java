@@ -19,5 +19,6 @@ public class SampleMRJob {
         output.collect(new Text(value.toString().toLowerCase()), one);
       }
     }
+
 }
 

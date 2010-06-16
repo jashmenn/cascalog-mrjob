@@ -45,32 +45,7 @@
 (w/defmapop [re-line-split [pattern]] [str]
   (s/re-split pattern (.toString str)))
 
-(defn to-lower-case [token-string]
-  (.toLowerCase token-string))
-
 (defn parse-int [number] (Integer. number))
-
-(comment 
-(?<- (stdout) [?word] (words ?line) 
-                       (re-split-op [#"\s+"] ?line :> ?word) (:distinct false))
-
-(let [q (<- [?word] (words ?line) 
-                    (re-split-op [#"\s+"] ?line :> ?word) (:distinct false))]
-  (?- (stdout) q))
-  )
-
-(comment
-(let [tmp1 (hfs-textline "tmp/tmp1")
-      q1 (<- [?word] (words ?line) 
-                    (re-split-op [#"\s+"] ?line :> ?word) (:distinct false))
-      flow1 (?| tmp1 q1)
-      q2 (<- [?w] (tmp1 ?line) 
-                    (to-lower-case ?line :> ?w) (:distinct false))
-      flow2 (?| (stdout) q2)
-      c (cascade flow1 flow2)]
-  (.complete c))
-)
-
 
 (defn lowercase-jobconf []
   (let [jobconf (new JobConf)]
@@ -97,82 +72,36 @@
     (do 
       (.connect c (into-array Flow flows)))))
 
+(defn goal 
+  "ideal api"
+  []
+    (?<- (stdout)  
+         [?word ?sum] 
+         ((hfs-textline "test/data/dog.txt") ?line) 
+         (re-split-op [#"\s+"] ?line :> ?word) (:distinct false)
+         (job [jobconf] ?word :> ?word ?one-str)
+         (parse-int ?one-str :> ?one) ; seqfile would solve this but complicate things elsewhere
+         (c/sum ?one :> ?sum)
+    )
+  )
+
+
 (defn run-test-job []
   (let [tmp1 (hfs-textline "tmp/tmp1")
         tmp2 (hfs-textline "tmp/tmp2")
-        q1 (<- [?word] ((hfs-textline "test/data/dog.txt") ?line) 
+        q1 (<- [?word] (words ?line) 
                       (re-split-op [#"\s+"] ?line :> ?word) (:distinct false))
         flow1 (?| tmp1 q1)
-        ;
-        ; q2 (<- [?w] (tmp1 ?line) 
-        ;               (to-lower-case ?line :> ?w) (:distinct false))
-        ; flow2 (?| tmp2 q2)
         flow2 (mr-flow (lowercase-jobconf) tmp1 tmp2) 
-        ;
         q3 (<- [?word ?sum] 
                (tmp2 ?line) 
                (re-line-split [#"\t"] ?line :> ?word ?count) (:distinct false)
                (parse-int ?count :> ?count-i)
                (c/sum ?count-i :> ?sum))
         flow3 (?| (stdout) q3)
-        ;
         c (cascade flow1 flow2 flow3)]
     (.complete c))
   )
-
-(comment 
-
-)
-
-(def word-prelim-counts 
-  (memory-source-tap [["my" "1"] 
-                      ["dog" "1"]
-                      ["has" "1"]
-                      ["fleas." "1"]
-                      ["good" "1"]
-                      ["dog" "1"]]))
-
-
-(comment
-
-(?<- (stdout) [?word ?sum] 
-     (word-prelim-counts ?word ?count)
-     (parse-int ?count :> ?count-i)
-     (c/sum ?count-i :> ?sum) 
-     )
-
-  )
-
-(comment 
-
-(let [tmp1 (hfs-textline "tmp/tmp1")
-      tmp2 (hfs-textline "tmp/tmp2")
-      jobconf (build-jobconf)
-      flow1 (mr-flow jobconf tmp1 tmp2)
-      c (cascade flow1)]
-  (.complete c))
-
-  )
-
-; wordsplit cascalog
-; downcase mr job
-; count cascadlog
-
-
-; tmpdir, guid, intermediate taps type
-; building cascade , calling cascade, building flows
-; new mapreduceflow with better taps
-; a java job to run
-; ability to cleanly put regular cascalog on either end
-
-; (?<- (stdout) [?w] ((hfs-textline "tmp/tmp1") ?line) (to-lower-case ?line :> ?w) (:distinct false))
-
-; (let [q (<- [?w] (word-split ?word) 
-;                     (to-lower-case ?word :> ?w) (:distinct false))]
-;   (?- (stdout) q))
-
-
-
 
 (comment 
 
