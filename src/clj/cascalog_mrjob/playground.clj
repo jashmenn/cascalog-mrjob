@@ -1,15 +1,12 @@
 ; Usage:
 ;
 ; REPL: 
-;   $ env JAVA_OPTS=-Xmx768m LEIN_CLASSPATH=src/clj ~/lib/lein repl
+;   $ env JAVA_OPTS=-Xmx768m LEIN_CLASSPATH=src/clj lein repl
 ;   # OR
 ;   $ lein uberjar && hadoop jar cascalog-mrjob-standalone.jar clojure.lang.Repl
 ;   # then 
 ;   (use 'cascalog-mrjob.playground) (bootstrap)
 ;
-; Running a job: 
-;   $ lein uberjar
-
 (ns cascalog-mrjob.playground
   (:use [cascalog api testing])
   (:use [cascalog-mrjob api])
@@ -32,6 +29,18 @@
     (require (quote [cascalog [workflow :as w] [vars :as v] [ops :as c]]))
     (ns cascalog-mrjob.playground) ; tmp?
   ))
+
+(defn ?|
+  "Builds a flow based on the sinks binded to the rules. 
+  Bindings are of form: sink rule"
+  [& bindings]
+  (let [[sinks gens]    (unweave bindings)
+        sourcemap       (apply merge (map :sourcemap gens))
+        tails           (map cascalog.rules/connect-to-sink gens sinks)
+        sinkmap         (w/taps-map tails sinks)
+        flow            (.connect (FlowConnector. (merge {"cascading.flow.job.pollinginterval" 100} cascalog.rules/*JOB-CONF*))
+                          sourcemap sinkmap (into-array Pipe tails))]
+        flow))
 
 (def words (memory-source-tap [
   ["My dog has fleas. Good Dog"]
@@ -72,6 +81,7 @@
     (do 
       (.connect c (into-array Flow flows)))))
 
+(comment 
 (defn goal 
   "ideal api"
   []
@@ -84,19 +94,21 @@
          (c/sum ?one :> ?sum)
     )
   )
+)
 
 (defn run-test-job []
-  (let [tmp1 (hfs-textline "tmp/tmp1")
+  (let [tmp1 (hfs-textline "tmp/tmp1") ; these should be auto-generated
         tmp2 (hfs-textline "tmp/tmp2")
         q1 (<- [?word] (words ?line) 
                       (re-split-op [#"\s+"] ?line :> ?word) (:distinct false))
         flow1 (?| tmp1 q1)
         flow2 (mr-flow (lowercase-jobconf) tmp1 tmp2) 
-        q3 (<- [?word ?sum] 
-               (tmp2 ?line) 
-               (re-line-split [#"\t"] ?line :> ?word ?count) (:distinct false)
-               (parse-int ?count :> ?count-i)
-               (c/sum ?count-i :> ?sum))
+        q3 (<- [?line] (tmp2 ?line))
+        ; q3 (<- [?word ?sum] 
+        ;        (tmp2 ?line) 
+        ;        (re-line-split [#"\t"] ?line :> ?word ?count) (:distinct false)
+        ;        (parse-int ?count :> ?count-i)
+        ;        (c/sum ?count-i :> ?sum))
         flow3 (?| (stdout) q3)
         c (cascade flow1 flow2 flow3)]
     (.complete c))
@@ -105,8 +117,7 @@
 (comment 
 
   (use 'cascalog-mrjob.playground) (bootstrap)
-
-  (run-test-job)
+  (run-test-job) 
 
   (.printStackTrace *e)
 
