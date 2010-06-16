@@ -1,0 +1,29 @@
+# cascalog-mrjob
+
+Goal: add a raw MR job to cascalog in a natural way
+
+Given a JobConf:
+
+    (defn lowercase-jobconf []
+      (let [jobconf (new JobConf)]
+        (doto jobconf 
+          (.setJobName "lowercase")
+          (.setOutputKeyClass Text)
+          (.setOutputValueClass IntWritable)
+          (.setMapperClass SampleMRJob$Map)
+          (.setReducerClass IdentityReducer)
+          (.setInputFormat TextInputFormat)
+          (.setOutputFormat TextOutputFormat)
+          )))
+
+Call with:
+
+    (?<- (stdout)  
+           [?word ?sum] 
+           (words ?line) 
+           (re-split-op [#"\s+"] ?line :> ?word) (:distinct false)
+           (job [jobconf] ?word :> ?word ?one-str)
+           (parse-int ?one-str :> ?one) ; seqfile would solve this but complicate things elsewhere
+           (c/sum ?one :> ?sum)
+
+# vim: ft=mkd
