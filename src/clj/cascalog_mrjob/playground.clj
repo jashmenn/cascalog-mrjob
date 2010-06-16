@@ -17,7 +17,7 @@
   (:require [clojure.contrib [str-utils :as s]])
   (:import  [cascading.cascade CascadeConnector Cascade])
   (:import  [cascalog.jobs SampleMRJob SampleMRJob$Map])
-  (:import  [cascading.flow MapReduceFlowTapped])
+  (:import  [cascading.flow Flow MapReduceFlowTapped])
   (:import  [org.apache.hadoop.mapred JobConf TextInputFormat TextOutputFormat 
              FileInputFormat FileOutputFormat])
   (:import  [org.apache.hadoop.io Text LongWritable IntWritable])
@@ -72,7 +72,7 @@
 )
 
 
-(def lowercase-jobconf
+(defn lowercase-jobconf []
   (let [jobconf (new JobConf)]
     (doto jobconf 
       (.setJobName "lowercase")
@@ -85,41 +85,44 @@
       )))
 
 (defn mr-flow [jobconf in-tap out-tap]
+  (do
   (doto jobconf
       (FileInputFormat/addInputPath (.getPath in-tap)) ; todo: setInputPaths
       (FileOutputFormat/setOutputPath (.getPath out-tap)))
   (new MapReduceFlowTapped (.getJobName jobconf) jobconf 
-       in-tap out-tap false true))
+       in-tap out-tap false true)))
 
 (defn cascade [& flows]
   (let [c (new CascadeConnector)]
     (do 
-      (.connect c (into-array flows)))))
+      (.connect c (into-array Flow flows)))))
 
-; (comment 
+(defn run-test-job []
+  (let [tmp1 (hfs-textline "tmp/tmp1")
+        tmp2 (hfs-textline "tmp/tmp2")
+        q1 (<- [?word] ((hfs-textline "test/data/dog.txt") ?line) 
+                      (re-split-op [#"\s+"] ?line :> ?word) (:distinct false))
+        flow1 (?| tmp1 q1)
+        ;
+        ; q2 (<- [?w] (tmp1 ?line) 
+        ;               (to-lower-case ?line :> ?w) (:distinct false))
+        ; flow2 (?| tmp2 q2)
+        flow2 (mr-flow (lowercase-jobconf) tmp1 tmp2) 
+        ;
+        q3 (<- [?word ?sum] 
+               (tmp2 ?line) 
+               (re-line-split [#"\t"] ?line :> ?word ?count) (:distinct false)
+               (parse-int ?count :> ?count-i)
+               (c/sum ?count-i :> ?sum))
+        flow3 (?| (stdout) q3)
+        ;
+        c (cascade flow1 flow2 flow3)]
+    (.complete c))
+  )
 
-(let [tmp1 (hfs-textline "tmp/tmp1")
-      tmp2 (hfs-textline "tmp/tmp2")
-      q1 (<- [?word] (words ?line) 
-                    (re-split-op [#"\s+"] ?line :> ?word) (:distinct false))
-      flow1 (?| tmp1 q1)
-      ;
-      ; q2 (<- [?w] (tmp1 ?line) 
-      ;               (to-lower-case ?line :> ?w) (:distinct false))
-      ; flow2 (?| tmp2 q2)
-      flow2 (mr-flow lowercase-jobconf tmp1 tmp2) 
-      ;
-      q3 (<- [?word ?sum] 
-             (tmp2 ?line) 
-             (re-line-split [#"\t"] ?line :> ?word ?count) (:distinct false)
-             (parse-int ?count :> ?count-i)
-             (c/sum ?count-i :> ?sum))
-      flow3 (?| (stdout) q3)
-      ;
-      c (cascade flow1 flow2 flow3)]
-  (.complete c))
+(comment 
 
-  ; )
+)
 
 (def word-prelim-counts 
   (memory-source-tap [["my" "1"] 
@@ -174,6 +177,8 @@
 (comment 
 
   (use 'cascalog-mrjob.playground) (bootstrap)
+
+  (run-test-job)
 
   (.printStackTrace *e)
 
